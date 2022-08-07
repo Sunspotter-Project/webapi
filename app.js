@@ -1,4 +1,4 @@
-//import { Database } from '../shared/db/db.mjs';
+import { Database } from './shared/db/db.mjs';
 import createError from 'http-errors';
 import express from 'express';
 //import sqlite from './db/aa-sqlite.mjs';
@@ -16,7 +16,7 @@ var dbfile = './db/webcam.db';
 sqlite.open(dbfile).catch(function(err) { console.error(err + ', DB file: ' + dbfile); });
 */
 
-/*
+
 // initialize database
 const dbname = (process.env.DBNAME || "sunspotter");
 const dbusername = (process.env.DBUSERNAME || "postgres");
@@ -30,13 +30,27 @@ try {
   console.error(`Unable to connect to the database ${dbname} with ${dbusername}:`, error);
 }
 
-*/
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
 
 var __dirname = path.resolve();
 
 var app = express();
 var port = normalizePort(process.env.PORT || '3001');
-app.set('port', port);
 
 // view engine setup
 app.set('views', path.join(__dirname, 'views'));
@@ -66,6 +80,12 @@ app.use(function(err, req, res, next) {
   // render the error page
   res.status(err.status || 500);
   res.render('error');
+});
+
+// Start the server
+app.listen(port, () => {
+  console.log(`Voyager listening on port ${port}`);
+  console.log('Press Ctrl+C to quit.');
 });
 
 export default app;
