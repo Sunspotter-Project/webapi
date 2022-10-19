@@ -27,7 +27,7 @@ try {
   await Database.init(dbHost, dbname, dbusername, dbpassword);
   console.log(`Database connection to host '${dbHost}' has been established successfully.`);
 } catch (error) {
-  console.error(`Unable to connect to the database ${dbname} with ${dbusername}:`, error);
+  console.error(`Unable to connect to the host ${dbHost} to database ${dbname} with ${dbusername}:`, error);
 }
 
 
@@ -62,6 +62,8 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.use('/predictions', express.static(path.join(__dirname, 'public', 'images', 'predicted')));
+
 app.use('/', indexRouter);
 app.use('/users', usersRouter);
 app.use('/webcam', webcamRouter);
@@ -84,7 +86,7 @@ app.use(function(err, req, res, next) {
 
 // Start the server
 app.listen(port, () => {
-  console.log(`Voyager listening on port ${port}`);
+  console.log(`Webapi listening on port ${port}`);
   console.log('Press Ctrl+C to quit.');
 });
 

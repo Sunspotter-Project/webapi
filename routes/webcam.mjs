@@ -12,10 +12,8 @@ import PredictionRun from '../shared/db/models/predictionrun.mjs';
 var router = express.Router();
 
 router.get('/v2', async function(req, res, next) {
-  var webcams;
-  var predictionrun;
-  var rawQuery;
-  var limit, age;
+
+  let limit, age;
 
   try {
 
@@ -41,51 +39,39 @@ router.get('/v2', async function(req, res, next) {
       age = 1800; // 15min
     }
 
-    rawQuery = `select pkpredictionrun, predictionrunid from "PredictionRuns" WHERE EXTRACT(EPOCH from (LOCALTIMESTAMP - "createdat")) < ${age} ORDER BY "createdat" DESC LIMIT 1`
+    // bounds query parameter
+    let bbox2d = {};
+    if (req.query.bounds != undefined) {
+      bbox2d = getBBox2d(req.query.bounds);
+    } else {
+      bbox2d.swlat = 45.04635929200553;
+      bbox2d.swlng = 4.257202148437501;
+      bbox2d.nelat = 48.60385760823255;
+      bbox2d.nelng = 14.804077148437502;
+    }
 
-    predictionrun = await PredictionRun.sequelize.query(rawQuery, {
-      // A function (or false) for logging your queries
-      // Will get called for every SQL query that gets sent
-      // to the server.
-      logging: console.log,
-    
-      // If plain is true, then sequelize will only return the first
-      // record of the result set. In case of false it will return all records.
-      plain: false,
-    
-      // Set this to true if you don't have a model definition for your query.
-      raw: false,
-
-      nest: true,
-    
-      // The type of query you are executing. The query type affects how results are formatted before they are passed back.
-      type: PredictionRun.sequelize.QueryTypes.SELECT
-    });
-
-    console.log(JSON.stringify(predictionrun));
-
-
-    rawQuery = `SELECT "Webcam"."webcamid", "Webcam"."imgurlmedres", "Webcam"."title", "Webcam"."location", "Webcam"."city", "Webcam"."countrycode", "Predictions"."confidence" AS "Predictions.confidence", "Predictions"."imgurl" AS "Predictions.imgurl", "PredictionModelLabels"."tfindex" AS "Predictions.tfindex", "Predictions"."createdat" AS "Predictions.createdat", "PredictionModelLabels"."name" AS "Predictions.name", "PredictionModelLabels"."icon" AS "Predictions.icon", "PredictionModelLabels"."cssclass" AS "Predictions.cssclass" FROM 
+    const rawQuery = `SELECT "Webcam"."webcamid", "Webcam"."lastupdate", "Webcam"."status", "Webcam"."imgurlmedres", "Webcam"."title", "Webcam"."location", "Webcam"."city", "Webcam"."country", "Webcam"."countrycode", "Predictions"."confidence" AS "prediction.confidence", "Predictions"."imgurl" AS "prediction.imgurl", "PredictionRuns"."predictionrunid" as "prediction.runid", "PredictionModelLabels"."tfindex" AS "prediction.tfindex", "Predictions"."createdat" AS "prediction.createdat", "PredictionModelLabels"."name" AS "prediction.name", "PredictionModelLabels"."icon" AS "prediction.icon", "PredictionModelLabels"."cssclass" AS "prediction.cssclass" FROM 
     "Webcams" as "Webcam"
-    left join "Predictions" on "Predictions".fkpredictionrun = '111f74dd-a62b-40b1-aea5-61b7f4248547' and "Predictions".fkwebcam = "Webcam"."pkwebcam"
+    left join "Predictions" on "Predictions".fkpredictionrun in (select pkpredictionrun from "PredictionRuns" WHERE EXTRACT(EPOCH from (LOCALTIMESTAMP - "createdat")) < ${age} ORDER BY "createdat" desc limit 1) and "Predictions".fkwebcam = "Webcam"."pkwebcam"
     left join "PredictionModelLabels" on "PredictionModelLabels"."pkpredictionmodellabel" = "Predictions"."fkpredictionmodellabel"
-  WHERE (ST_Intersects("Webcam"."location", ST_SetSRID(ST_MakeBox2D(ST_Point(45.04635929200553, 4.257202148437501), ST_Point(48.60385760823255, 14.804077148437502)), 4326)) = true AND "Webcam"."lastupdate" IS NOT NULL) limit ${limit}`;
+    left join "PredictionRuns" on "PredictionRuns".pkpredictionrun = "Predictions".fkpredictionrun
+    WHERE (ST_Intersects("Webcam"."location", ST_SetSRID(ST_MakeBox2D(ST_Point(${bbox2d.swlat}, ${bbox2d.swlng}), ST_Point(${bbox2d.nelat}, ${bbox2d.nelng})), 4326)) = true AND "Webcam"."lastupdate" IS NOT NULL) limit ${limit}`
 
-    webcams = await Webcam.sequelize.query(rawQuery, {
+    const webcams = await Webcam.sequelize.query(rawQuery, {
       // A function (or false) for logging your queries
       // Will get called for every SQL query that gets sent
       // to the server.
       logging: console.log,
-    
+
       // If plain is true, then sequelize will only return the first
       // record of the result set. In case of false it will return all records.
       plain: false,
-    
+
       // Set this to true if you don't have a model definition for your query.
       raw: false,
 
       nest: true,
-    
+
       // The type of query you are executing. The query type affects how results are formatted before they are passed back.
       type: Webcam.sequelize.QueryTypes.SELECT
     });
@@ -183,12 +169,12 @@ router.get('/', async function(req, res, next) {
         [Webcam.sequelize.Sequelize.Op.and]: [
           // bounding box
           Webcam.sequelize.where(
-            Webcam.sequelize.fn('ST_Intersects', Webcam.sequelize.col('location'), 
+            Webcam.sequelize.fn('ST_Intersects', Webcam.sequelize.col('location'),
                 Webcam.sequelize.fn('ST_SetSRID',
                   Webcam.sequelize.fn('ST_MakeBox2D', Webcam.sequelize.fn('ST_Point', bbox2d.swllat, bbox2d.swlng), Webcam.sequelize.fn('ST_Point', bbox2d.nelat, bbox2d.nelng)),
-                  4326 
+                  4326
                 )
-              ), true 
+              ), true
           ),
           {
             // lastupdate
@@ -197,7 +183,7 @@ router.get('/', async function(req, res, next) {
             }
           }
         ]
-      }  
+      }
     } else {
       whereWebcams = {
         // lastupdate
@@ -206,7 +192,7 @@ router.get('/', async function(req, res, next) {
         }
       };
     }
-    
+
     wherePredictionRuns = PredictionRun.sequelize.where(
       PredictionRun.sequelize.fn('EXTRACT',
       PredictionRun.sequelize.literal('EPOCH from (LOCALTIMESTAMP - "createdat")')
@@ -218,15 +204,15 @@ router.get('/', async function(req, res, next) {
       where: wherePredictionRuns,
       order:  [ [ PredictionRun.sequelize.col('createdat'), 'DESC' ] ]
     })
-    
- 
-    /* for development return the first found prediction run 
+
+
+    /* for development return the first found prediction run
     latestPredictionRun = await PredictionRun.findOne({
       limit: 1,
       order:  [ [ PredictionRun.sequelize.col('createdat'), 'DESC' ] ]
     })
     */
-    
+
     if (requestedPml.length > 0) {
       wherePml = [];
       for (var q = 0; q < requestedPml.length; q++) {
@@ -251,17 +237,17 @@ router.get('/', async function(req, res, next) {
 
       webcams = await Webcam.findAll({
         limit: limit,
-        include: { 
+        include: {
           model: Prediction,
           include: [
             { model: PredictionModelLabel,
-              where: wherePredictionModelLabel 
+              where: wherePredictionModelLabel
             },
-            { 
+            {
               model: PredictionRun,
               where: { pkpredictionrun: pkLatestPredictionRun },
               separate: false
-            } 
+            }
           ],
         },
         where: whereWebcams,
@@ -287,7 +273,7 @@ function getBBox2d(bounds) {
   var bounds = bounds.split(',');
   var bbox2d = {
     swlng: parseFloat(bounds[0]),
-    swllat: parseFloat(bounds[1]),
+    swlat: parseFloat(bounds[1]),
     nelng: parseFloat(bounds[2]),
     nelat: parseFloat(bounds[3]),
   }
@@ -298,7 +284,7 @@ async function loadPredictionsForWebcams(webcams) {
   var predictions;
   var prediction;
   var webcam;
-  try 
+  try
   {
     predictions = await dbprediction.getAll();
     if (predictions.length > 0) {
@@ -327,7 +313,7 @@ router.get('/download', function(req, res, next) {
   if (webcamid === undefined) {
     webcamid = '';
   }
-  
+
   var datetimeto = getLocalDateTimeNowString();
   res.render('webcam', { title: 'Download webcam images', downloadurl: './download', webcamid: webcamid, datetimeto: datetimeto });
 });
@@ -343,7 +329,7 @@ function getLocalDateTimeNowString() {
   if (day < 10) {
     day = '0' + day;
   }
-  
+
   var dateTimeNowString = datetimenow.getFullYear() + '-' + month + '-'+ day + 'T' + datetimenow.toLocaleTimeString();
   return dateTimeNowString;
 }
@@ -387,7 +373,7 @@ router.get('/windy', function(req, res, next) {
 /* init webcam database */
 router.get('/init', async function(req, res, next) {
   var webcamlist;
-  try 
+  try
   {
     await dbprediction.drop();
     await dbwebcam.init();
@@ -419,19 +405,19 @@ router.get('/geocode', async function(req, res, next) {
     for(var i = 0; i < webcams.length; i++) {
       webcamObj = webcams[i];
       console.log("Get LatLong for webcam:", webcamObj.ID, webcamObj.title);
-      
+
       if (useGeocodeService) {
-        latlong = await getWebcamLatLong(webcamObj.title, webcamObj.webcamid); 
+        latlong = await getWebcamLatLong(webcamObj.title, webcamObj.webcamid);
       } else {
         latlong = await getWebcamLatLongFromCache(webcamObj.title, webcamObj.webcamid);
         if (latlong === null) {
-          latlong = await getWebcamLatLong(webcamObj.title, webcamObj.webcamid); 
+          latlong = await getWebcamLatLong(webcamObj.title, webcamObj.webcamid);
         }
       }
-      
+
       if (latlong != null) {
         await dbwebcam.updateLatLong(webcamObj.ID, latlong.lat, latlong.long);
-      } 
+      }
     }
     webcams = await dbwebcam.getAll();
     await loadPredictionsForWebcams(webcams);
@@ -456,7 +442,7 @@ router.get('/predictall', async function(req, res, next) {
     if (python.status > 0) {
       throw new Error(`Calling ${predictscript} failed with status: ${python.status}`);
     }
-    
+
     predictscriptoutput = uint8ArrayToString(python.stdout);
     console.log(predictscriptoutput);
 
@@ -500,7 +486,7 @@ function uint8ArrayToString(uint8array)
 router.get('/list', async function(req, res, next) {
   var webcamlist;
   const fromcache = req.fromcache;
-  
+
   if (fromcache !== undefined && fromcache !== '') {
     webcamlist = await getWebcamListFromCache();
   } else {
@@ -543,10 +529,10 @@ async function getWebcamLatLong(title, webcamid) {
       } catch (err) {
           console.error(err);
       }
-  
+
       // try to get the point
       point = getPoint(jsonObj);
-    } 
+    }
   } catch(err) {
     console.error(err);
   }
@@ -598,10 +584,10 @@ function buildDownloadImages(webcamid, urlTemplate, dateTimeFrom, dateTimeTo, ti
 }
 
 function buildWebcamImage(webcamid, urlTemplate, dateTime) {
-  /* e.g. 
+  /* e.g.
     https://www.foto-webcam.eu/webcam/innsbruck-uni-west/2020/12/30/1200_la.jpg
     https://www.foto-webcam.eu/webcam/%webcamid/%YYYY/%mm/%dd/%HH%MM_la.jpg
-  */ 
+  */
   var fullYear = dateTime.getFullYear();
   var month = dateTime.getMonth(); // month starts at 0
   month ++;
@@ -641,10 +627,10 @@ function buildWebcamImage(webcamid, urlTemplate, dateTime) {
 
 function buildWebcamImageUrl(webcamid, urlTemplate)
 {
-  /* e.g. 
+  /* e.g.
     https://www.foto-webcam.eu/webcam/innsbruck-uni-west/current/180.jpg
     https://www.foto-webcam.eu/webcam/%webcamid/%YYYY/%mm/%dd/%HH%MM_la.jpg
-  */ 
+  */
   var url = urlTemplate.replace('%webcamid', webcamid);
   return url;
 }
@@ -663,7 +649,7 @@ function buildWebcamTitle(title) {
 
 function buildWebcamId(webcamIdWithUrl) {
   var webcamid;
-  
+
   console.log(`webcamidwithurl: ${webcamIdWithUrl}`);
 
   webcamid = webcamIdWithUrl.replace('webcam', '');
@@ -686,7 +672,7 @@ async function downloadImage(image, pathToSave) {
     }
     filename = `${pathToSave}${image.filename}`;
     fs.writeFileSync(filename, buffer);
-  } 
+  }
   catch(err)
   {
     console.error(err);
@@ -722,7 +708,7 @@ async function getWebcamListFromFotoWebcamEu(webcamlisturl, cssClassname) {
     const { document } = (new JSDOM(htmlString)).window;
     const arrOfElems = document.querySelectorAll(cssClassnameOfWecamElem);
     for (var i = 0; i < arrOfElems.length; i++) {
-      webcamEl = arrOfElems[i]; 
+      webcamEl = arrOfElems[i];
       title = buildWebcamTitle(webcamEl.title);
       webcamid = buildWebcamId(webcamEl.href);
       imgurl = buildWebcamImageUrl(webcamid, imgurlTempl);
