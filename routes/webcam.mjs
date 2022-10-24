@@ -11,33 +11,88 @@ import PredictionRun from '../shared/db/models/predictionrun.mjs';
 
 var router = express.Router();
 
-router.get('/v2', async function(req, res, next) {
+function validateInt(value, min, max) {
+  if (isNaN(value))
+    throw new Error(`${value} is not a number.`);
 
-  let limit, age;
+  const number = parseInt(value, 10);
+  if (number < min) return min;
+  else if (number > max) return max;
+  else return number;
+}
+
+function validateFloat(value, min, max) {
+  if (isNaN(value))
+    throw new Error(`${value} is not a number.`);
+
+  const number = parseFloat(value);
+  if (number < min) return min;
+  else if (number > max) return max;
+  else return number;
+}
+
+function validatePredictionModelLabels(labels, allowedLabels) {
+  let validLabels = [];
+  if ((labels !== undefined) && (labels !== '')) {
+    validLabels = labels.split(",").filter(label => allowedLabels.find(allowedLabel => allowedLabel === label));
+  }
+  return validLabels;
+}
+
+function predictionModelLabelsToSqlQuery(labels) {
+  const sqlEqual = (label) => {
+    return ` OR "PredictionModelLabels"."name" = '${label}'`;
+  }
+  return labels.map(sqlEqual).join('');
+}
+
+router.get('/v2', async function(req, res, next) {
 
   try {
 
     // limit query parameter
+    const maxLimit = 100;
+    const minLimit = 10;
+    let limit = 50;
     if (req.query.limit !== undefined) {
-      if (isNaN(req.query.limit)) {
+      try {
+        limit = validateInt(req.query.limit, minLimit, maxLimit);
+      } catch {
         throw new Error(`The submit limit value ${req.query.limit} is not a number.`);
-      } else {
-        limit = parseInt(req.query.limit);
       }
-    } else {
-      limit = 50;
     }
 
-    // age query parameter
+    // prediction age
+    const minAge = 1800;
+    const maxAge = 3600;
+    let age = 1800;
     if (req.query.age !== undefined) {
-      if (isNaN(req.query.age)) {
+      try {
+        age = validateInt(req.query.age, minAge, maxAge);
+      } catch {
         throw new Error(`The submit age value ${req.query.age} is not a number.`);
-      } else {
-        age = parseInt(req.query.age);
       }
-    } else {
-      age = 1800; // 15min
     }
+
+    // prediction confidence
+    const minConfidence = 10.0;
+    const maxConfidence = 100.0;
+    let confidence = 0.6;
+    if (req.query.confidence !== undefined) {
+      try {
+        confidence = validateFloat(req.query.confidence, minAge, maxAge);
+        confidence = confidence / 100.0;
+      } catch {
+        throw new Error(`The submit confidence value ${req.query.confidence} is not a number.`);
+      }
+    }
+    console.log(`Confidence set to: ${confidence}`);
+
+    // prediction model label query parameter
+    const allowedLabels = [ 'sunny', 'cloudy-rainy' ];
+    const labels = validatePredictionModelLabels(req.query.pml, allowedLabels);
+    const sqlPredictionModelLabelsQuery = predictionModelLabelsToSqlQuery(labels);
+    console.log(`Prediction model labels query: ${sqlPredictionModelLabelsQuery}`);
 
     // bounds query parameter
     let bbox2d = {};
@@ -50,12 +105,15 @@ router.get('/v2', async function(req, res, next) {
       bbox2d.nelng = 14.804077148437502;
     }
 
-    const rawQuery = `SELECT "Webcam"."webcamid", "Webcam"."lastupdate", "Webcam"."status", "Webcam"."imgurlmedres", "Webcam"."title", "Webcam"."location", "Webcam"."city", "Webcam"."country", "Webcam"."countrycode", "Predictions"."confidence" AS "prediction.confidence", "Predictions"."imgurl" AS "prediction.imgurl", "PredictionRuns"."predictionrunid" as "prediction.runid", "PredictionModelLabels"."tfindex" AS "prediction.tfindex", "Predictions"."createdat" AS "prediction.createdat", "PredictionModelLabels"."name" AS "prediction.name", "PredictionModelLabels"."icon" AS "prediction.icon", "PredictionModelLabels"."cssclass" AS "prediction.cssclass" FROM 
-    "Webcams" as "Webcam"
-    left join "Predictions" on "Predictions".fkpredictionrun in (select pkpredictionrun from "PredictionRuns" WHERE EXTRACT(EPOCH from (LOCALTIMESTAMP - "createdat")) < ${age} ORDER BY "createdat" desc limit 1) and "Predictions".fkwebcam = "Webcam"."pkwebcam"
-    left join "PredictionModelLabels" on "PredictionModelLabels"."pkpredictionmodellabel" = "Predictions"."fkpredictionmodellabel"
-    left join "PredictionRuns" on "PredictionRuns".pkpredictionrun = "Predictions".fkpredictionrun
-    WHERE (ST_Intersects("Webcam"."location", ST_SetSRID(ST_MakeBox2D(ST_Point(${bbox2d.swlat}, ${bbox2d.swlng}), ST_Point(${bbox2d.nelat}, ${bbox2d.nelng})), 4326)) = true AND "Webcam"."lastupdate" IS NOT NULL) limit ${limit}`
+    const rawQuery = `SELECT "Webcam"."webcamid", "Webcam"."lastupdate", "Webcam"."status", "Webcam"."imgurlmedres", "Webcam"."imgurlhighres", "Webcam"."title", "Webcam"."location", "Webcam"."city", "Webcam"."country", "Webcam"."countrycode", "Predictions"."confidence" AS "prediction.confidence", "Predictions"."imgurl" AS "prediction.imgurl", "PredictionRuns"."predictionrunid" as "prediction.runid", "PredictionModelLabels"."tfindex" AS "prediction.tfindex", "Predictions"."createdat" AS "prediction.createdat", "PredictionModelLabels"."name" AS "prediction.name", "PredictionModelLabels"."icon" AS "prediction.icon", "PredictionModelLabels"."cssclass" AS "prediction.cssclass" FROM 
+    "Webcams" AS "Webcam"
+    LEFT JOIN "Predictions" ON "Predictions".fkpredictionrun IN (SELECT pkpredictionrun FROM "PredictionRuns" WHERE EXTRACT(EPOCH FROM (LOCALTIMESTAMP - "createdat")) < ${age} ORDER BY "createdat" DESC limit 1) AND "Predictions".fkwebcam = "Webcam"."pkwebcam"
+    LEFT JOIN "PredictionModelLabels" ON "PredictionModelLabels"."pkpredictionmodellabel" = "Predictions"."fkpredictionmodellabel"
+    LEFT JOIN "PredictionRuns" ON "PredictionRuns".pkpredictionrun = "Predictions".fkpredictionrun
+    WHERE (ST_Intersects("Webcam"."location", ST_SetSRID(ST_MakeBox2D(ST_Point(${bbox2d.swlat}, ${bbox2d.swlng}), ST_Point(${bbox2d.nelat}, ${bbox2d.nelng})), 4326)) = true AND "Webcam"."lastupdate" IS NOT NULL) 
+    AND ("Predictions"."confidence" IS NULL OR "Predictions"."confidence" >= ${confidence}) 
+    AND ("PredictionModelLabels"."name" IS NULL${sqlPredictionModelLabelsQuery})
+    limit ${limit}`
 
     const webcams = await Webcam.sequelize.query(rawQuery, {
       // A function (or false) for logging your queries
@@ -268,14 +326,16 @@ router.get('/', async function(req, res, next) {
   }
 });
 
-function getBBox2d(bounds) {
+function getBBox2d(boundsDelemited) {
   // bounds is in Leaflet format: 'southwest_lng,southwest_lat,northeast_lng,northeast_lat'
-  var bounds = bounds.split(',');
-  var bbox2d = {
-    swlng: parseFloat(bounds[0]),
-    swlat: parseFloat(bounds[1]),
-    nelng: parseFloat(bounds[2]),
-    nelat: parseFloat(bounds[3]),
+  const minBound = 0.0;
+  const maxBound = 180.0;
+  const bounds = boundsDelemited.split(',');
+  const bbox2d = {
+    swlng: validateFloat(bounds[0], minBound, maxBound),
+    swlat: validateFloat(bounds[1], minBound, maxBound),
+    nelng: validateFloat(bounds[2], minBound, maxBound),
+    nelat: validateFloat(bounds[3], minBound, maxBound),
   }
   return bbox2d;
 }
