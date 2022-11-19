@@ -41,7 +41,7 @@ function validatePredictionModelLabels(labels, allowedLabels) {
 
 function predictionModelLabelsToSqlQuery(labels) {
   const sqlEqual = (label) => {
-    return ` OR "PredictionModelLabels"."name" = '${label}'`;
+    return ` OR pml."name" = '${label}'`;
   }
   return labels.map(sqlEqual).join('');
 }
@@ -105,15 +105,7 @@ router.get('/v2', async function(req, res, next) {
       bbox2d.nelng = 14.804077148437502;
     }
 
-    const rawQuery = `SELECT "Webcam"."webcamid", "Webcam"."lastupdate", "Webcam"."status", "Webcam"."imgurlmedres", "Webcam"."imgurlhighres", "Webcam"."title", "Webcam"."location", "Webcam"."city", "Webcam"."country", "Webcam"."countrycode", "Predictions"."confidence" AS "prediction.confidence", "Predictions"."imgurl" AS "prediction.imgurl", "PredictionRuns"."predictionrunid" as "prediction.runid", "PredictionModelLabels"."tfindex" AS "prediction.tfindex", "Predictions"."createdat" AS "prediction.createdat", "PredictionModelLabels"."name" AS "prediction.name", "PredictionModelLabels"."icon" AS "prediction.icon", "PredictionModelLabels"."cssclass" AS "prediction.cssclass" FROM 
-    "Webcams" AS "Webcam"
-    LEFT JOIN "Predictions" ON "Predictions".fkpredictionrun IN (SELECT pkpredictionrun FROM "PredictionRuns" WHERE EXTRACT(EPOCH FROM (LOCALTIMESTAMP - "createdat")) < ${age} ORDER BY "createdat" DESC limit 1) AND "Predictions".fkwebcam = "Webcam"."pkwebcam"
-    LEFT JOIN "PredictionModelLabels" ON "PredictionModelLabels"."pkpredictionmodellabel" = "Predictions"."fkpredictionmodellabel"
-    LEFT JOIN "PredictionRuns" ON "PredictionRuns".pkpredictionrun = "Predictions".fkpredictionrun
-    WHERE (ST_Intersects("Webcam"."location", ST_SetSRID(ST_MakeBox2D(ST_Point(${bbox2d.swlat}, ${bbox2d.swlng}), ST_Point(${bbox2d.nelat}, ${bbox2d.nelng})), 4326)) = true AND "Webcam"."lastupdate" IS NOT NULL) 
-    AND ("Predictions"."confidence" IS NULL OR "Predictions"."confidence" >= ${confidence}) 
-    AND ("PredictionModelLabels"."name" IS NULL${sqlPredictionModelLabelsQuery})
-    limit ${limit}`
+    const rawQuery = `WITH webcamsinarea AS ( SELECT pkwebcam from "Webcams" where ST_Intersects("location", ST_SetSRID(ST_MakeBox2D(ST_Point(${bbox2d.swlat}, ${bbox2d.swlng}), ST_Point(${bbox2d.nelat}, ${bbox2d.nelng})), 4326)) = true and lastupdate is not null limit ${limit} ), webcampredictions AS ( select latest_predictions.fkwebcam, p.pkprediction, p.createdat from (select fkwebcam, max(createdat) as createdat FROM "Predictions" where fkwebcam in (select pkwebcam from webcamsinarea) group by fkwebcam) latest_predictions inner join "Predictions" p on latest_predictions.fkwebcam = p.fkwebcam and latest_predictions.createdat = p.createdat where EXTRACT(EPOCH from (LOCALTIMESTAMP - p.createdat)) < ${age} ) select distinct w.webcamid, w.status, w.lastupdate, w.imgurlmedres, w.imgurlhighres, w.title, w.location, w.city, w.country, w.countrycode, p.confidence AS "prediction.confidence", p.imgurl AS "prediction.imgurl", p.createdat AS "prediction.createdat", pml.name AS "prediction.name", pml.tfindex AS "prediction.tfindex", pml.icon AS "prediction.icon", pml.cssclass AS "prediction.cssclass", pr.predictionrunid as "prediction.runid" from webcamsinarea as wia left join "Webcams" w on w.pkwebcam = wia.pkwebcam left join webcampredictions wp on wp.fkwebcam = wia.pkwebcam left join "Predictions" p on p.pkprediction = wp.pkprediction left join "PredictionModelLabels" pml on pml.pkpredictionmodellabel = p.fkpredictionmodellabel left join "PredictionRuns" pr on pr.pkpredictionrun = p.fkpredictionrun where (p.confidence is null or p.confidence >= ${confidence}) and (pml.name IS NULL${sqlPredictionModelLabelsQuery})`;
 
     const webcams = await Webcam.sequelize.query(rawQuery, {
       // A function (or false) for logging your queries
