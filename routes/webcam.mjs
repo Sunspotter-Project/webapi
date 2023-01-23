@@ -46,6 +46,37 @@ function predictionModelLabelsToSqlQuery(labels) {
   return labels.map(sqlEqual).join('');
 }
 
+router.get('/geojson', async function(req, res, next) {
+
+  try {
+    const rawQuery = `SELECT json_build_object('type', 'FeatureCollection','features', json_agg(ST_AsGeoJSON(t.*)::json)) AS geojson FROM (SELECT w.webcamid, w.title, ST_Transform( w.location, 4326 ) FROM "Webcams" w) AS t(id, name, geom);`;
+
+    const webcams = await Webcam.sequelize.query(rawQuery, {
+      // A function (or false) for logging your queries
+      // Will get called for every SQL query that gets sent
+      // to the server.
+      logging: console.log,
+
+      // If plain is true, then sequelize will only return the first
+      // record of the result set. In case of false it will return all records.
+      plain: false,
+
+      // Set this to true if you don't have a model definition for your query.
+      raw: false,
+
+      nest: true,
+
+      // The type of query you are executing. The query type affects how results are formatted before they are passed back.
+      type: Webcam.sequelize.QueryTypes.SELECT
+    });
+
+    res.send(webcams);
+  } catch(err) {
+    console.error(err);
+    next(err);
+  }
+});
+
 router.get('/v2', async function(req, res, next) {
 
   try {
@@ -105,7 +136,7 @@ router.get('/v2', async function(req, res, next) {
       bbox2d.nelng = 14.804077148437502;
     }
 
-    const rawQuery = `WITH webcamsinarea AS ( SELECT pkwebcam from "Webcams" where ST_Intersects("location", ST_SetSRID(ST_MakeBox2D(ST_Point(${bbox2d.swlat}, ${bbox2d.swlng}), ST_Point(${bbox2d.nelat}, ${bbox2d.nelng})), 4326)) = true and lastupdate is not null order by random() limit ${limit} ), webcampredictions AS ( select latest_predictions.fkwebcam, p.pkprediction, p.createdat from (select fkwebcam, max(createdat) as createdat FROM "Predictions" where fkwebcam in (select pkwebcam from webcamsinarea) group by fkwebcam) latest_predictions inner join "Predictions" p on latest_predictions.fkwebcam = p.fkwebcam and latest_predictions.createdat = p.createdat where EXTRACT(EPOCH from (LOCALTIMESTAMP - p.createdat)) < ${age} ) select distinct w.webcamid, w.status, w.lastupdate, w.imgurlmedres, w.imgurlhighres, w.title, w.location, w.city, w.country, w.countrycode, p.confidence AS "prediction.confidence", p.imgurl AS "prediction.imgurl", p.createdat AS "prediction.createdat", pml.name AS "prediction.name", pml.tfindex AS "prediction.tfindex", pml.icon AS "prediction.icon", pml.cssclass AS "prediction.cssclass", pr.predictionrunid as "prediction.runid" from webcamsinarea as wia left join "Webcams" w on w.pkwebcam = wia.pkwebcam left join webcampredictions wp on wp.fkwebcam = wia.pkwebcam left join "Predictions" p on p.pkprediction = wp.pkprediction left join "PredictionModelLabels" pml on pml.pkpredictionmodellabel = p.fkpredictionmodellabel left join "PredictionRuns" pr on pr.pkpredictionrun = p.fkpredictionrun where (p.confidence is null or p.confidence >= ${confidence}) and (pml.name IS NULL${sqlPredictionModelLabelsQuery})`;
+    const rawQuery = `WITH webcamsinarea AS ( SELECT pkwebcam from "Webcams" where ST_Intersects("location", ST_SetSRID(ST_MakeBox2D(ST_Point(${bbox2d.swlng}, ${bbox2d.swlat}), ST_Point(${bbox2d.nelng}, ${bbox2d.nelat})), 4326)) = true and lastupdate is not null order by random() limit ${limit} ), webcampredictions AS ( select latest_predictions.fkwebcam, p.pkprediction, p.createdat from (select fkwebcam, max(createdat) as createdat FROM "Predictions" where fkwebcam in (select pkwebcam from webcamsinarea) group by fkwebcam) latest_predictions inner join "Predictions" p on latest_predictions.fkwebcam = p.fkwebcam and latest_predictions.createdat = p.createdat where EXTRACT(EPOCH from (LOCALTIMESTAMP - p.createdat)) < ${age} ) select distinct w.webcamid, w.status, w.lastupdate, w.imgurlmedres, w.imgurlhighres, w.title, w.location, w.city, w.country, w.countrycode, p.confidence AS "prediction.confidence", p.imgurl AS "prediction.imgurl", p.createdat AS "prediction.createdat", pml.name AS "prediction.name", pml.tfindex AS "prediction.tfindex", pml.icon AS "prediction.icon", pml.cssclass AS "prediction.cssclass", pr.predictionrunid as "prediction.runid" from webcamsinarea as wia left join "Webcams" w on w.pkwebcam = wia.pkwebcam left join webcampredictions wp on wp.fkwebcam = wia.pkwebcam left join "Predictions" p on p.pkprediction = wp.pkprediction left join "PredictionModelLabels" pml on pml.pkpredictionmodellabel = p.fkpredictionmodellabel left join "PredictionRuns" pr on pr.pkpredictionrun = p.fkpredictionrun where (p.confidence is null or p.confidence >= ${confidence}) and (pml.name IS NULL${sqlPredictionModelLabelsQuery})`;
 
     const webcams = await Webcam.sequelize.query(rawQuery, {
       // A function (or false) for logging your queries
