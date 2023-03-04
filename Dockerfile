@@ -11,31 +11,30 @@ WORKDIR /opt/sunspotter
 # Install app dependencies
 # A wildcard is used to ensure both package.json AND package-lock.json are copied
 # where available (npm@5+)
-COPY ./webapi/package*.json ./
+COPY ./package*.json ./
 
 RUN npm install
 # If you are building your code for production
 # RUN npm ci --only=production
 
 # Bundle app source
-COPY ./webapi/routes/ ./routes
-COPY ./webapi/shared/ ./shared
-COPY ./webapi/app.js .
-COPY ./webapp/build ./public
+COPY ./routes/ ./routes
+COPY ./shared/ ./shared
+COPY ./app.js .
 
 RUN mkdir -p /opt/sunspotter/public/images/predicted
 
 # Install shared project
 WORKDIR /opt/shared
 
-COPY ./webapi/shared/package*.json .
+COPY ./shared/package*.json .
 
 RUN npm install
 # If you are building your code for production
 # RUN npm ci --only=production
 
 # Bundle app source
-COPY ./webapi/shared/ .
+COPY ./shared/ .
 
 WORKDIR /opt/sunspotter
 
